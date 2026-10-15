@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.h3_production_agent import (
     _append_missing_dialogues,
     _append_shot_soundscape,
@@ -57,3 +59,13 @@ def test_prompt_split_keeps_common_preamble_and_shot_sections() -> None:
     assert "[Shot 0]" in sections[0]
     assert "[Shot 1]" in sections[1]
     assert "overall_soundscape:" not in sections[1]
+
+
+def test_prompt_split_blocks_missing_shot_markers() -> None:
+    with pytest.raises(ValueError, match=r"expected 2.*found 0"):
+        _split_prompt_by_shot("Common header only", 2)
+
+
+def test_prompt_split_blocks_incomplete_shot_count() -> None:
+    with pytest.raises(ValueError, match=r"expected 2.*found 1"):
+        _split_prompt_by_shot("Common header\n[Shot 0]\nOnly one shot.", 2)

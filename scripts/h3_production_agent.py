@@ -20,6 +20,8 @@ from typing import Any, Iterator
 PLATFORM_FUNCTIONS = [
     "agent.harness.director.materialize.materialize",
     "agent.harness.production.build_production_prompt",
+    "agent.h3_contract.h3_aspect_ratio",
+    "agent.h3_contract.compute_video_size",
     "backend.app.h3_recipe.compile_recipe",
     "agent.prompt.request_builder.GenerationRequestBuilder.build",
     "backend.app.routers.jobs.CreateJobRequest.model_validate",
@@ -156,8 +158,11 @@ def _split_prompt_by_shot(prompt: str, shot_count: int) -> tuple[str, list[str]]
     without re-rendering or rewriting the platform prompt.
     """
     matches = list(_SHOT_MARK_RE.finditer(prompt or ""))
-    if not matches:
-        return "", [prompt or "" for _ in range(shot_count)]
+    if len(matches) != shot_count:
+        raise ValueError(
+            "H3 segment prompt shot markers do not match the storyboard: "
+            f"expected {shot_count}, found {len(matches)}"
+        )
     preamble = prompt[: matches[0].start()].strip()
     sections: list[str] = []
     for index, match in enumerate(matches):
@@ -167,9 +172,7 @@ def _split_prompt_by_shot(prompt: str, shot_count: int) -> tuple[str, list[str]]
         tail = _GLOBAL_PROMPT_TAIL_RE.search(sections[-1])
         if tail:
             sections[-1] = sections[-1][: tail.start()].strip()
-    if len(sections) < shot_count:
-        sections.extend([sections[-1]] * (shot_count - len(sections)))
-    return preamble, sections[:shot_count]
+    return preamble, sections
 
 
 def _compose_shot_prompt(preamble: str, section: str) -> str:
@@ -372,6 +375,7 @@ def _import_platform(platform_root: Path, runtime_root: Path):
     try:
         from agent.harness.director import materialize
         from agent.harness.production import build_production_prompt
+        from agent.h3_contract import compute_video_size, h3_aspect_ratio
         from agent.prompt.request_builder import GenerationRequestBuilder
         from agent.schema.generation import AssetRecord, AssetStatus, CapabilityMode
         from agent.schema.prompt_pipeline import CompiledPromptRecord, GenerationTarget
@@ -381,6 +385,8 @@ def _import_platform(platform_root: Path, runtime_root: Path):
         return {
             "materialize": materialize.materialize,
             "build_production_prompt": build_production_prompt,
+            "h3_aspect_ratio": h3_aspect_ratio,
+            "compute_video_size": compute_video_size,
             "GenerationRequestBuilder": GenerationRequestBuilder,
             "AssetRecord": AssetRecord,
             "AssetStatus": AssetStatus,
@@ -402,24 +408,96 @@ def _import_platform(platform_root: Path, runtime_root: Path):
 
 
 def _build_task_assets(
-    asset_bindings: dict[str, str],
+    prompt_build: dict[str, Any],
     platform: dict[str, Any],
     project_id: str,
 ) -> list[Any]:
-    records = []
-    for index, (name, asset_id) in enumerate(asset_bindings.items(), start=1):
+    records: list[Any] = []
+    for index, ref in enumerate(prompt_build.get("asset_refs") or [], start=1):
+        asset_id = _clean_name(ref.get("asset_id"))
+        if not asset_id:
+            continue
+        name = _clean_name(ref.get("name")) or asset_id
+        kind = _clean_name(ref.get("kind")) or "asset"
         records.append(
             platform["AssetRecord"](
                 asset_id=asset_id,
                 project_id=project_id,
-                entity_ref=f"character.{name}",
+                entity_ref=f"{kind}.{name}",
                 kind="image",
-                capability="image.krea.generate",
+                capability="",
                 status=platform["AssetStatus"].APPROVED,
-                metadata={"display_name": name, "picture_slot": index},
+                metadata={
+                    "display_name": name,
+                    "asset_kind": kind,
+                    "picture_slot": index,
+                    "role": _clean_name(ref.get("role")),
+                    "stage": _clean_name(ref.get("stage")),
+                    "look": _clean_name(ref.get("look")),
+                    "variant": _clean_name(ref.get("variant")),
+                },
+            )
+        )
+
+    manifest = (prompt_build.get("ir") or {}).get("asset_manifest") or []
+    voice_names = {
+        _clean_name(item.get("asset_id")): _clean_name(item.get("name"))
+        for item in manifest
+        if _clean_name(item.get("kind")) == "voice"
+    }
+    for index, raw_asset_id in enumerate(prompt_build.get("voice_ids") or [], start=1):
+        asset_id = _clean_name(raw_asset_id)
+        if not asset_id:
+            continue
+        name = voice_names.get(asset_id) or asset_id
+        records.append(
+            platform["AssetRecord"](
+                asset_id=asset_id,
+                project_id=project_id,
+                entity_ref=f"voice.{name}",
+                kind="audio",
+                capability="",
+                status=platform["AssetStatus"].APPROVED,
+                metadata={
+                    "display_name": name,
+                    "asset_kind": "voice",
+                    "voice_slot": index,
+                },
             )
         )
     return records
+
+
+def _asset_bindings_from_prompt_build(
+    prompt_build: dict[str, Any],
+) -> dict[str, dict[str, str]]:
+    bindings: dict[str, dict[str, str]] = {
+        "characters": {},
+        "scene": {},
+        "voice": {},
+    }
+    for ref in prompt_build.get("asset_refs") or []:
+        asset_id = _clean_name(ref.get("asset_id"))
+        if not asset_id:
+            continue
+        name = _clean_name(ref.get("name")) or asset_id
+        kind = _clean_name(ref.get("kind"))
+        if kind == "character":
+            bindings["characters"][name] = asset_id
+        elif kind == "scene":
+            bindings["scene"][name] = asset_id
+
+    manifest = (prompt_build.get("ir") or {}).get("asset_manifest") or []
+    voice_names = {
+        _clean_name(item.get("asset_id")): _clean_name(item.get("name"))
+        for item in manifest
+        if _clean_name(item.get("kind")) == "voice"
+    }
+    for raw_asset_id in prompt_build.get("voice_ids") or []:
+        asset_id = _clean_name(raw_asset_id)
+        if asset_id:
+            bindings["voice"][voice_names.get(asset_id) or asset_id] = asset_id
+    return bindings
 
 
 def _request_payload(request: Any) -> dict[str, Any]:
@@ -471,7 +549,13 @@ def compile_h3_production_package(
     segment_prompt = str(prompt_build.get("prompt") or "")
     preamble, shot_sections = _split_prompt_by_shot(segment_prompt, len(storyboard))
     object_by_shot, _ = _object_state_snapshots(object_records)
-    task_assets = _build_task_assets(asset_bindings, platform, project_id)
+    task_assets = _build_task_assets(prompt_build, platform, project_id)
+    platform_asset_bindings = _asset_bindings_from_prompt_build(prompt_build)
+    platform_blockers = [
+        str(issue) for issue in (prompt_build.get("blocking_issues") or []) if issue
+    ]
+    aspect_ratio = platform["h3_aspect_ratio"]()
+    frame_width, frame_height = platform["compute_video_size"](aspect_ratio)
 
     tasks: list[dict[str, Any]] = []
     validation_rows: list[dict[str, Any]] = []
@@ -495,12 +579,9 @@ def compile_h3_production_package(
             shot_prompt,
             str(item.get("audio_desc") or ""),
         )
-        blocked_reasons: list[str] = []
-        if not asset_bindings:
-            blocked_reasons.append("character_reference_missing")
-        blocked_reasons.append("scene_reference_missing")
-        if dialogues:
-            blocked_reasons.append("voice_reference_missing")
+        blocked_reasons = list(platform_blockers)
+        if not prompt_build.get("ok") and not blocked_reasons:
+            blocked_reasons.append("build_production_prompt_not_ok")
 
         # Copy V2 state records and carry the last known state across shots that
         # do not have a new ObjectStateRecord.  This is reporting only; it does
@@ -530,7 +611,7 @@ def compile_h3_production_package(
             prompt_text=shot_prompt,
             mode="r2v",
             capability_group="multi_reference",
-            ref_count=len(task_assets),
+            ref_count=sum(1 for asset in task_assets if asset.kind == "image"),
         )
         target = platform["GenerationTarget"](
             target_id=f"h3-{shot_id}",
@@ -562,7 +643,7 @@ def compile_h3_production_package(
             project_id=project_id,
             params_extra={
                 "duration": h3_duration,
-                "aspect_ratio": "9:16",
+                "aspect_ratio": aspect_ratio,
                 "optimization": optimization,
                 "capability_group": "multi_reference",
                 "h3_backend": "auto",
@@ -584,6 +665,8 @@ def compile_h3_production_package(
             validated = None
             valid = False
             errors = [str(exc)]
+        if not valid:
+            blocked_reasons.append("request_validation_failed")
 
         task = {
             "shot_id": shot_id,
@@ -619,7 +702,7 @@ def compile_h3_production_package(
                 "shot_prompt": shot_prompt,
                 "segment_prompt": segment_prompt,
                 "build_ok": bool(prompt_build.get("ok")),
-                "build_blocking_issues": list(prompt_build.get("blocking_issues") or []),
+                "build_blocking_issues": list(platform_blockers),
                 "recipe": recipe,
                 "request": request_payload,
             }
@@ -633,10 +716,11 @@ def compile_h3_production_package(
             "platform_root": str(platform_path),
         },
         "platform_functions_used": list(PLATFORM_FUNCTIONS),
-        "asset_bindings": {
-            "characters": dict(asset_bindings),
-            "scene": {},
-            "voice": {},
+        "asset_bindings": platform_asset_bindings,
+        "platform_contract": {
+            "aspect_ratio": aspect_ratio,
+            "width": frame_width,
+            "height": frame_height,
         },
         "tasks": tasks,
         "input_validation": validation_rows,
@@ -648,6 +732,7 @@ def compile_h3_production_package(
             "advisories": list(prompt_build.get("advisories") or []),
             "asset_ids": list(prompt_build.get("asset_ids") or []),
             "voice_ids": list(prompt_build.get("voice_ids") or []),
+            "asset_refs": list(prompt_build.get("asset_refs") or []),
             "renderer": prompt_build.get("renderer"),
         },
         "llm_usage": {

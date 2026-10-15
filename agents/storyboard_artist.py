@@ -1,5 +1,6 @@
 from typing import List, Optional, Literal
 import asyncio
+import re
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt
 
@@ -126,6 +127,7 @@ Additionally, you will receive a sequence of potential characters, each containi
 - Clearly distinguish camera movement from actor movement. Name the camera movement separately, then describe actor movement in relation to the moving frame.
 - Maintain a complete First Frame -> Motion Process -> Last Frame state closure: the motion must begin from the stated first-frame state and end in the stated last-frame state without unexplained teleportation, pose jumps, or contradictory contact.
 - When audio_desc contains a [Speaker] line, coordinate the visible performance with it: use natural speaking lip movement, breath, vocal effort, gaze, and interaction when the speaker is visible. If the speaker is not visible in the frame, keep the listener active with a timed reaction instead of making the listener motionless.
+- Preserve every scripted dialogue line from audio_desc verbatim in motion_desc and perform the lines in their original order. Do not omit, paraphrase, merge, or reorder dialogue while writing the motion process.
 - Use scene_context for environment and continuity only. Use previous_shot_context and next_shot_context to preserve necessary start and end states, while keeping the current shot self-contained. Do not copy the whole scene or invent events not supported by the context.
 - Adapt the amount of performance to the intended performance duration when DURATION_CONTEXT provides one. Estimate the whole shot, not by mechanically multiplying the number of action steps. A source time window or a phrase such as "the last approximately 0.6 seconds" is not automatically the duration of the whole shot. Respect the duration source: a user-provided duration is a hard constraint, while a director estimate is a planning estimate and not a user-specified hard duration. Focus on actions and reactions that can physically be performed in that time; compress or omit subordinate business rather than overloading the shot. Do not mechanically add a time window to every action.
 - If DURATION_CONTEXT says "not provided", plan coherent, plausible motion from the available visual evidence but do not claim that timing validation passed, and do not fabricate a duration.
@@ -217,6 +219,65 @@ def _build_decompose_prompt_inputs(
             duration_status,
         ),
     }
+
+
+_AUDIO_DIALOGUE_RE = re.compile(
+    r"[^:\uff1a\n]{1,120}?[:：]\s*[\u201c\"]([^\u201d\"]+)[\u201d\"]"
+)
+_MARKERLESS_SPEAKER_RE = re.compile(
+    r"[\u4e00-\u9fffA-Za-z][^:\uff1a\n]{0,80}?"
+    r"[\uff08(][^:\uff1a\n]{0,80}?[\uff09)][^:\uff1a\n]{0,80}?[:：]"
+)
+
+
+def _normalize_dialogue_text(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or ""))
+
+
+def _extract_audio_dialogue(audio_desc: str) -> list[str]:
+    """Extract spoken lines without treating ambient sound descriptions as dialogue."""
+    dialogue: list[str] = []
+    for line in str(audio_desc or "").splitlines():
+        if not line.strip():
+            continue
+        has_speaker_marker = "[说话人]" in line or "[Speaker]" in line
+        has_markerless_speaker = bool(_MARKERLESS_SPEAKER_RE.search(line))
+        if not has_speaker_marker and not has_markerless_speaker:
+            continue
+        dialogue.extend(
+            match.group(1).strip()
+            for match in _AUDIO_DIALOGUE_RE.finditer(line)
+            if match.group(1).strip()
+        )
+    return dialogue
+
+
+def validate_dialogue_performance(audio_desc: str, motion_desc: str) -> None:
+    """Require motion_desc to preserve audio_desc dialogue verbatim and in order."""
+    expected = _extract_audio_dialogue(audio_desc)
+    if not expected:
+        return
+
+    normalized_motion = _normalize_dialogue_text(motion_desc)
+    cursor = -1
+    missing: list[str] = []
+    for line in expected:
+        position = normalized_motion.find(_normalize_dialogue_text(line))
+        if position < 0:
+            missing.append(line)
+            continue
+        if position < cursor:
+            raise ValueError(
+                "motion_desc dialogue order differs from audio_desc; "
+                f"expected order: {expected}"
+            )
+        cursor = position
+
+    if missing:
+        raise ValueError(
+            "motion_desc omitted dialogue from audio_desc; "
+            f"missing lines: {missing}"
+        )
 
 
 class VisDescDecompositionResponse(BaseModel):
@@ -350,6 +411,10 @@ class StoryboardArtist:
 
         validate_char_idxs(decomposition.ff_vis_char_idxs, len(characters), "ff_vis_char_idxs")
         validate_char_idxs(decomposition.lf_vis_char_idxs, len(characters), "lf_vis_char_idxs")
+        validate_dialogue_performance(
+            shot_brief_desc.audio_desc,
+            decomposition.motion_desc,
+        )
 
         return ShotDescription(
             idx=shot_brief_desc.idx,

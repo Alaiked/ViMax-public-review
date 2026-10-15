@@ -1,23 +1,9 @@
-import re
-
 import pytest
 
-
-_QUOTED_LINE_RE = re.compile(r"\u201c([^\u201d]+)\u201d")
-
-
-def _spoken_order(text: str) -> list[str]:
-    return _QUOTED_LINE_RE.findall(text)
+from agents.storyboard_artist import validate_dialogue_performance
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known V8 candidate defect: motion_desc reverses dialogue order and "
-        "ViMax currently has no automatic motion/audio order validator."
-    ),
-)
-def test_v8_dialogue_order_regression_is_reproduced_with_synthetic_fixture() -> None:
+def test_dialogue_order_regression_is_rejected_and_correct_order_passes() -> None:
     audio_desc = (
         "[\u8bf4\u8bdd\u4eba] Role A: \u201cFirst line.\u201d\n"
         "[\u8bf4\u8bdd\u4eba] Role B: \u201cSecond line.\u201d"
@@ -26,5 +12,22 @@ def test_v8_dialogue_order_regression_is_reproduced_with_synthetic_fixture() -> 
         "Role B says \u201cSecond line.\u201d "
         "Role A then says \u201cFirst line.\u201d"
     )
+    corrected_motion_desc = (
+        "Role A says \u201cFirst line.\u201d "
+        "Role B then says \u201cSecond line.\u201d"
+    )
 
-    assert _spoken_order(v8_style_motion_desc) == _spoken_order(audio_desc)
+    with pytest.raises(ValueError, match="order"):
+        validate_dialogue_performance(audio_desc, v8_style_motion_desc)
+
+    validate_dialogue_performance(audio_desc, corrected_motion_desc)
+
+
+def test_dialogue_omission_is_rejected() -> None:
+    audio_desc = (
+        "[\u8bf4\u8bdd\u4eba] Role A: \u201cFirst line.\u201d\n"
+        "[\u8bf4\u8bdd\u4eba] Role B: \u201cSecond line.\u201d"
+    )
+
+    with pytest.raises(ValueError, match="omitted"):
+        validate_dialogue_performance(audio_desc, "Role A speaks only once.")

@@ -21,6 +21,10 @@ tests, and sanitized review evidence needed to inspect those changes.
   `957e08cb5de95f096f2fb9cfb8d30a0a5907c61d`
 - Private source commit subject:
   `checkpoint: ViMax director planning and H3 preparation`
+- The public mirror also contains the deterministic working-tree fixes for
+  dialogue-order validation and H3 prompt-split failure handling; these were
+  not committed to the private source repository when this review revision was
+  built.
 - License: the original upstream `LICENSE` is preserved unchanged.
 
 This public mirror uses a new single-commit Git history. It does not publish or
@@ -108,9 +112,10 @@ python -m pytest
 ```
 
 The public tests are intentionally synthetic. They verify prompt and context
-contracts and preserve the known V8 dialogue-order defect as a strict expected
-failure. A structural pass is not a director-quality pass, a prop-continuity
-pass, a timing pass, or a production-ready declaration.
+contracts, require dialogue in `motion_desc` to preserve the source order, and
+require incomplete `[Shot N]` prompt splits to fail instead of duplicating a
+shot. A structural pass is not a director-quality pass, a prop-continuity pass,
+a timing pass, or a production-ready declaration.
 
 The V8 external-director candidate is retained as `NO MERGE`: it improved camera
 economy but reversed two dialogue lines in `motion_desc` relative to
