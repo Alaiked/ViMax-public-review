@@ -1,0 +1,57 @@
+# Python-generated files
+__pycache__/
+*.py[cod]
+build/
+dist/
+wheels/
+*.egg-info/
+
+# Virtual environments and caches
+.venv/
+.pytest_cache/
+.pytest_tmp*/
+.mypy_cache/
+.ruff_cache/
+
+# Local environment files and credentials
+.env
+.env.*
+!.env.example
+*.local
+credentials*
+cookies*
+id_rsa*
+id_ed25519*
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Private inputs, generated artifacts, and production material
+scripts/inputs/
+deliverables/
+assets/
+outputs/
+generated/
+*.sqlite
+*.sqlite3
+*.db
+*.onnx
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.wav
+*.mp3
+*.log
+
+# Internal planning and local instructions
+AGENTS.md
+project_plan/
+project_working/
+user_idea/

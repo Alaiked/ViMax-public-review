@@ -1,0 +1,23 @@
+[project]
+name = "vimax-public-review"
+version = "0.1.0"
+description = "Sanitized public code-review mirror for ViMax director text planning"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=0.3.26",
+    "langchain-core>=0.3.0",
+    "pillow>=11.3.0",
+    "pydantic>=2.0",
+    "requests>=2.32.4",
+    "tenacity>=9.1.2",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
