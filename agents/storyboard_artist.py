@@ -1,4 +1,4 @@
-from typing import List, Optional, Literal
+from typing import List, NamedTuple, Optional, Literal
 import asyncio
 import re
 from pydantic import BaseModel, Field
@@ -222,21 +222,50 @@ def _build_decompose_prompt_inputs(
 
 
 _AUDIO_DIALOGUE_RE = re.compile(
-    r"[^:\uff1a\n]{1,120}?[:：]\s*[\u201c\"]([^\u201d\"]+)[\u201d\"]"
+    r"(?P<speaker>[^:\uff1a\n]{1,120}?)[:\uff1a]\s*"
+    r"[\u201c\"](?P<text>[^\u201d\"]+)[\u201d\"]"
 )
 _MARKERLESS_SPEAKER_RE = re.compile(
     r"[\u4e00-\u9fffA-Za-z][^:\uff1a\n]{0,80}?"
     r"[\uff08(][^:\uff1a\n]{0,80}?[\uff09)][^:\uff1a\n]{0,80}?[:：]"
 )
+_SPEECH_ACTION_RE = re.compile(
+    r"(?:says?|said|speaks?|spoke|speaking|utters?|uttered|"
+    r"whispers?|whispered|murmurs?|murmured|replies?|replied|"
+    r"asks?|asked|answers?|answered|"
+    r"\u8bf4|\u8bf4\u9053|\u5f00\u53e3|\u56de\u7b54|\u95ee|"
+    r"\u558a|\u4f4e\u58f0\u8bf4|\u5599\u5583\u8bf4)",
+    re.IGNORECASE,
+)
+_SPEAKER_CLAUSE_SPLIT_RE = re.compile(
+    r"[\u201c\u201d\"\u3002\uff01\uff1f.!?;；\n]"
+)
+
+
+class _DialogueCue(NamedTuple):
+    speaker: str
+    text: str
 
 
 def _normalize_dialogue_text(value: str) -> str:
     return re.sub(r"\s+", "", str(value or ""))
 
 
-def _extract_audio_dialogue(audio_desc: str) -> list[str]:
-    """Extract spoken lines without treating ambient sound descriptions as dialogue."""
-    dialogue: list[str] = []
+def _normalize_dialogue_speaker(value: str) -> str:
+    speaker = _normalize_dialogue_text(value)
+    speaker = re.sub(
+        r"^\[(?:\u8bf4\u8bdd\u4eba|Speaker)\]",
+        "",
+        speaker,
+        flags=re.IGNORECASE,
+    )
+    speaker = re.sub(r"[\uff08(][^\uff09)]*[\uff09)]$", "", speaker)
+    return speaker
+
+
+def _extract_audio_dialogue_cues(audio_desc: str) -> list[_DialogueCue]:
+    """Extract dialogue text together with its explicit speaker label."""
+    cues: list[_DialogueCue] = []
     for line in str(audio_desc or "").splitlines():
         if not line.strip():
             continue
@@ -244,34 +273,110 @@ def _extract_audio_dialogue(audio_desc: str) -> list[str]:
         has_markerless_speaker = bool(_MARKERLESS_SPEAKER_RE.search(line))
         if not has_speaker_marker and not has_markerless_speaker:
             continue
-        dialogue.extend(
-            match.group(1).strip()
-            for match in _AUDIO_DIALOGUE_RE.finditer(line)
-            if match.group(1).strip()
-        )
-    return dialogue
+        for match in _AUDIO_DIALOGUE_RE.finditer(line):
+            text = match.group("text").strip()
+            if not text:
+                continue
+            cues.append(
+                _DialogueCue(
+                    speaker=_normalize_dialogue_speaker(match.group("speaker")),
+                    text=text,
+                )
+            )
+    return cues
+
+
+def _extract_audio_dialogue(audio_desc: str) -> list[str]:
+    """Extract spoken lines without treating ambient sound descriptions as dialogue."""
+    return [cue.text for cue in _extract_audio_dialogue_cues(audio_desc)]
+
+
+def _dialogue_speaker_aliases(cues: list[_DialogueCue]) -> dict[str, set[str]]:
+    aliases: dict[str, set[str]] = {}
+    for cue in cues:
+        speaker = _normalize_dialogue_speaker(cue.speaker)
+        if speaker:
+            aliases.setdefault(speaker, set()).add(speaker)
+    return aliases
+
+
+def _explicit_speaker_for_occurrence(
+    normalized_motion: str,
+    position: int,
+    text_length: int,
+    aliases: dict[str, set[str]],
+) -> str:
+    """Return a uniquely named speaker near one dialogue occurrence, if any."""
+    prefix = normalized_motion[max(0, position - 160):position]
+    suffix = normalized_motion[
+        position + text_length:position + text_length + 160
+    ]
+    prefix_clause = _SPEAKER_CLAUSE_SPLIT_RE.split(
+        prefix.strip("\u201c\u201d\"")
+    )[-1].casefold()
+    suffix_clause = _SPEAKER_CLAUSE_SPLIT_RE.split(
+        suffix.strip("\u201c\u201d\"")
+    )[0].casefold()
+
+    mentioned: set[str] = set()
+    for speaker, speaker_aliases in aliases.items():
+        for alias in speaker_aliases:
+            normalized_alias = alias.casefold()
+            for match in re.finditer(re.escape(normalized_alias), prefix_clause):
+                if _SPEECH_ACTION_RE.search(prefix_clause[match.end():]):
+                    mentioned.add(speaker)
+            for match in re.finditer(re.escape(normalized_alias), suffix_clause):
+                if _SPEECH_ACTION_RE.search(suffix_clause[:match.start()]):
+                    mentioned.add(speaker)
+
+    if len(mentioned) == 1:
+        return next(iter(mentioned))
+    return ""
 
 
 def validate_dialogue_performance(audio_desc: str, motion_desc: str) -> None:
     """Require motion_desc to preserve audio_desc dialogue verbatim and in order."""
-    expected = _extract_audio_dialogue(audio_desc)
-    if not expected:
+    cues = _extract_audio_dialogue_cues(audio_desc)
+    if not cues:
         return
 
+    expected = [cue.text for cue in cues]
+    aliases = _dialogue_speaker_aliases(cues)
     normalized_motion = _normalize_dialogue_text(motion_desc)
-    cursor = -1
+    cursor = 0
     missing: list[str] = []
-    for line in expected:
-        position = normalized_motion.find(_normalize_dialogue_text(line))
+    for cue in cues:
+        line = cue.text
+        normalized_line = _normalize_dialogue_text(line)
+        position = normalized_motion.find(normalized_line, cursor)
         if position < 0:
+            if normalized_motion.find(normalized_line) >= 0:
+                raise ValueError(
+                    "motion_desc dialogue order or multiplicity differs from "
+                    "audio_desc; "
+                    f"expected order: {expected}"
+                )
             missing.append(line)
             continue
-        if position < cursor:
+
+        explicit_speaker = _explicit_speaker_for_occurrence(
+            normalized_motion,
+            position,
+            len(normalized_line),
+            aliases,
+        )
+        expected_speaker = _normalize_dialogue_speaker(cue.speaker)
+        if (
+            explicit_speaker
+            and expected_speaker
+            and explicit_speaker.casefold() != expected_speaker.casefold()
+        ):
             raise ValueError(
-                "motion_desc dialogue order differs from audio_desc; "
-                f"expected order: {expected}"
+                "motion_desc attributes dialogue to the wrong speaker; "
+                f"expected {cue.speaker!r} for {line!r}, "
+                f"found {explicit_speaker!r}"
             )
-        cursor = position
+        cursor = position + len(normalized_line)
 
     if missing:
         raise ValueError(

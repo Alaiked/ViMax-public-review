@@ -163,6 +163,14 @@ def _split_prompt_by_shot(prompt: str, shot_count: int) -> tuple[str, list[str]]
             "H3 segment prompt shot markers do not match the storyboard: "
             f"expected {shot_count}, found {len(matches)}"
         )
+    found_shot_idxs = [int(match.group(1)) for match in matches]
+    expected_shot_idxs = list(range(shot_count))
+    if found_shot_idxs != expected_shot_idxs:
+        raise ValueError(
+            "H3 segment prompt shot marker sequence does not match the "
+            "storyboard: "
+            f"expected {expected_shot_idxs}, found {found_shot_idxs}"
+        )
     preamble = prompt[: matches[0].start()].strip()
     sections: list[str] = []
     for index, match in enumerate(matches):

@@ -69,3 +69,24 @@ def test_prompt_split_blocks_missing_shot_markers() -> None:
 def test_prompt_split_blocks_incomplete_shot_count() -> None:
     with pytest.raises(ValueError, match=r"expected 2.*found 1"):
         _split_prompt_by_shot("Common header\n[Shot 0]\nOnly one shot.", 2)
+
+
+def test_prompt_split_blocks_duplicate_shot_markers() -> None:
+    prompt = "Common header\n[Shot 0]\nFirst shot.\n\n[Shot 0]\nSecond shot."
+
+    with pytest.raises(ValueError, match=r"sequence.*expected.*found"):
+        _split_prompt_by_shot(prompt, 2)
+
+
+def test_prompt_split_blocks_out_of_order_shot_markers() -> None:
+    prompt = "Common header\n[Shot 1]\nSecond-shot body.\n\n[Shot 0]\nFirst-shot body."
+
+    with pytest.raises(ValueError, match=r"sequence.*expected.*found"):
+        _split_prompt_by_shot(prompt, 2)
+
+
+def test_prompt_split_blocks_skipped_shot_marker() -> None:
+    prompt = "Common header\n[Shot 0]\nFirst shot.\n\n[Shot 2]\nThird shot."
+
+    with pytest.raises(ValueError, match=r"sequence.*expected.*found"):
+        _split_prompt_by_shot(prompt, 2)
