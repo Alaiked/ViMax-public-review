@@ -1,5 +1,6 @@
 from typing import List, NamedTuple, Optional, Literal
 import asyncio
+import json
 import re
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt
@@ -66,19 +67,34 @@ You are a professional film director and storyboard artist. Convert the original
 - Preserve every scripted dialogue line exactly once, in the original order, in the audio description of the shots. Do not summarize, paraphrase, merge, or invent lines.
 - Do not add characters, extras, locations, props, or events that are not supported by the script.
 
-[Shot design]
+[Script timeline]
+- Before choosing shots, reconstruct the scripted order of dialogue, required actions, consequences, and character or prop state changes. Keep that causal chain intact from the first state of the scene to the last.
+- Event order is not automatically edit order. A later shot may reveal a reaction or a consequence that was withheld earlier only when this does not change the scripted facts. Do not move a scripted line or required event later in scene time merely to manufacture a cut, a reaction, or suspense.
+- Preserve the original dependency between setup and payoff. If a line or action depends on a prior event, the board must make that prior event legible before or within the same continuous beat.
+
+[Beat-to-shot decisions]
 - Organize the board by dramatic beats, not by dialogue count, action-step count, or a mechanical shot-reverse-shot pattern.
-- Each shot must have one primary dramatic function: reveal information, change power or intimacy, stage a decision, register a reaction, establish a necessary spatial relation, or create a deliberate hold or ellipsis.
-- Choose what the audience first sees, where attention moves, and what image or tension remains at the end of the shot. A shot may contain multiple lines or actions when they form one beat.
+- Convert each playable beat into a concrete viewing purpose. For each shot, decide its attention target and its primary dramatic function: reveal information, change power or intimacy, stage a decision, register a reaction, establish a necessary spatial relation, or create a deliberate hold or ellipsis.
+- Decide what the audience first sees, where attention moves, and what image or tension remains at the end of the shot. Let the key action, opposing reaction, information reveal, or pause determine when the audience needs a new viewing moment. A shot may contain multiple lines or actions when they form one beat.
+- An independent reaction shot only when it needs its own viewing moment. It is not mandatory, and it should not be created merely because a reaction is already mentioned in the preceding shot.
 - Cut when attention, knowledge, power, space, point of view, or rhythm changes. A change in shot size alone is not an editing motivation.
 - Use reactions, off-screen presence, occlusion, foreground layering, spatial separation, action matching, or stillness when they carry meaning. Do not force any device or movement into every shot.
-- Convert character objectives and tactics into concrete playable behavior: listening, withholding, testing, deciding, resisting, committing, changing tactics, or reacting at a specific moment. Avoid generic expression labels and decorative gestures.
+- Convert character objectives and tactics into concrete playable behavior: listening, withholding, testing, deciding, resisting, committing, changing tactics, or reacting at a specific moment. Avoid generic expression labels such as a slight frown, complicated eyes, or a vague emotional look, and avoid decorative gestures that are not tied to a tactic.
 - Keep a decisive cause and its visible consequence together when they form one continuous action. Do not split preparation, execution, contact, and result into routine prop inserts unless isolation or withheld information has a real dramatic purpose.
-- Describe the camera precisely: shot size, angle, composition, focus, movement, and the reason the frame changes. Camera movement must reveal, follow, pressure, isolate, connect, or withhold; static framing is valid when the beat needs it.
+- Do not impose a minimum shot count. Shot-reverse-shot, close-ups, reaction shots, camera movement, and coverage patterns are optional tools, not a coverage template. Safe but generic coverage is not acceptable when a more precise dramatic choice is available.
+- Camera movement must reveal, follow, pressure, isolate, connect, or withhold; static framing is valid when the beat needs it. Do not add camera movement merely to make the shot feel cinematic.
+
+[Performance budget]
+- Budget every shot from actual performance: dialogue rate, pauses, travel, contact, reaction, and a usable edit-out point. Seven or eight seconds of continuous performance must not be placed in a four-second shot.
+- Estimate estimated_duration_seconds for the whole shot, including concurrent behavior and the final settled state. Do not copy source time windows or mechanically multiply action steps; mark the result honestly as a director estimate instead of a user-provided duration.
+- Let the beat determine the duration, then verify that the visible action can finish inside it. A short shot may use a precise action or reaction; a longer shot must earn its length through developing behavior, not filler.
+
+[Physical and spatial continuity]
 - Maintain a consistent 180-degree action axis, eyeline, screen direction, spatial geography, and prop state across cuts. Motivate a necessary axis change visibly.
 - Make important actions, contact, and prop state visible within the intended composition. Do not assert a scripted action off-screen when the beat depends on seeing it.
-- Treat cam_idx as a reusable camera setup, not a shot number. Reuse a setup only when position, lens, angle, framing, and movement baseline genuinely match.
-- Estimate estimated_duration_seconds from the full performance: dialogue length, pauses, concurrent behavior, physical travel, contact, and the final reaction. Do not copy source time windows or mechanically multiply action steps. Mark it honestly as a director estimate.
+- For every cut, the previous shot's exit state must equal the next shot's entry state, or the transition must be shown. Track owner, support, hand, grip, and contact for every decisive object.
+- Do not assume an object has already been retrieved, moved, opened, released, or handed over. Show the necessary approach, contact, movement, and settled result within the available performance time.
+- Treat cam_idx as a reusable camera setup, not a shot number. Reuse a setup only when camera position, lens, angle, framing, and movement baseline match; same cam_idx only when camera position, lens, angle, framing, and movement baseline match.
 
 [Visible storyboard contract]
 - Every visual description must be self-contained and use frame-relative placement and clear direction of gaze and movement.
@@ -112,6 +128,54 @@ human_prompt_template_design_storyboard = \
 <DIRECTOR_INTERPRETATION>
 {director_interpretation}
 </DIRECTOR_INTERPRETATION>
+"""
+
+
+system_prompt_template_revise_storyboard_dialogue = \
+"""
+[Role]
+You are repairing one director-planned storyboard before it enters the existing decomposition pipeline.
+
+[Task]
+Return the complete revised storyboard using the supplied structured schema.
+
+[Authority]
+- The original script is the final authority for story events, dialogue, props, space, and motivation.
+- The current storyboard is otherwise approved. Preserve its directing choices wherever possible.
+- Change only what is necessary to restore the exact scripted dialogue sequence reported in <DIALOGUE_FIDELITY_ISSUE>.
+
+[Revision rules]
+- Preserve every scripted dialogue line verbatim, exactly once, in the original script order.
+- If the current shot distribution loses a line, restores the line by repairing the smallest necessary set of shots.
+- You may redistribute dialogue or insert a shot only when required to preserve scene-time order and performance causality.
+- Put every restored line in audio_desc with an explicit speaker and its exact scripted text, using the existing [Speaker] or [Dialogue] convention.
+- Never return an empty storyboard. Preserve the complete approved shot sequence unless a shot change is required to restore dialogue order.
+- Do not change scripted events, outcomes, character motivation, props, locations, or spatial continuity.
+- If shot indexes or boundaries change, return a self-consistent sequential board with only the final shot marked as last.
+- Keep FF/Motion/LF downstream compatibility by preserving the existing ShotBriefDescription fields and constraints.
+
+[Output]
+{format_instructions}
+"""
+
+
+human_prompt_template_revise_storyboard_dialogue = \
+"""
+<SCRIPT>
+{script_str}
+</SCRIPT>
+
+<CHARACTERS>
+{characters_str}
+</CHARACTERS>
+
+<DIALOGUE_FIDELITY_ISSUE>
+{dialogue_fidelity_issue}
+</DIALOGUE_FIDELITY_ISSUE>
+
+<CURRENT_STORYBOARD>
+{current_storyboard_json}
+</CURRENT_STORYBOARD>
 """
 
 
@@ -291,6 +355,30 @@ class _DialogueCue(NamedTuple):
     text: str
 
 
+_SPEAKER_DIALOGUE_RE = re.compile(
+    r"(?P<speaker>[^:\uff1a\n]{1,160}?)[:\uff1a]\s*"
+    r"(?:[\(\uff08][^)\uff09]*[)\uff09]\s*)*"
+    r"[\u201c\"](?P<text>[^\u201d\"]+)[\u201d\"]"
+)
+_SCRIPT_SPEAKER_LINE_RE = re.compile(
+    r"^\s*(?P<speaker>[A-Za-z\u4e00-\u9fff][^:\uff1a\n]{0,80}?)"
+    r"\s*[:\uff1a]\s*(?P<text>.+?)\s*$"
+)
+_SCRIPT_LEADING_PARENTHETICAL_RE = re.compile(
+    r"^\s*(?:[\(\uff08][^)\uff09]*[)\uff09]\s*)+"
+)
+_AUDIO_UNQUOTED_DIALOGUE_RE = re.compile(
+    r"\[(?:Speaker|\u8bf4\u8bdd\u4eba|Dialogue|\u5bf9\u767d)\]\s*"
+    r"(?P<speaker>[^:\uff1a\n]{1,140}?)\s*[:\uff1a]\s*"
+    r"(?P<text>.+?)\s*$",
+    re.IGNORECASE,
+)
+_PLAIN_STORYBOARD_DIALOGUE_RE = re.compile(
+    r"^(?P<speaker>[^\n]{1,180})\s*[:\uff1a]\s*"
+    r"(?P<text>.+?)\s*$",
+)
+
+
 def _normalize_dialogue_text(value: str) -> str:
     return re.sub(r"\s+", "", str(value or ""))
 
@@ -342,6 +430,186 @@ def _dialogue_speaker_aliases(cues: list[_DialogueCue]) -> dict[str, set[str]]:
         if speaker:
             aliases.setdefault(speaker, set()).add(speaker)
     return aliases
+
+
+def _character_dialogue_aliases(
+    characters: List[CharacterInScene],
+) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for character in characters:
+        name = _normalize_dialogue_speaker(character.identifier_in_scene)
+        if name:
+            aliases.setdefault(name.casefold(), name)
+    return aliases
+
+
+def _canonical_dialogue_speaker(
+    value: str,
+    aliases: dict[str, str],
+) -> str:
+    speaker = _normalize_dialogue_speaker(value)
+    speaker = re.sub(r"^\[[^\]]+\]\s*", "", speaker).strip()
+    if speaker.casefold() in aliases:
+        return aliases[speaker.casefold()]
+
+    best_name = ""
+    best_position = -1
+    for alias_key, canonical_name in aliases.items():
+        position = speaker.casefold().rfind(alias_key)
+        if position > best_position:
+            best_position = position
+            best_name = canonical_name
+    return best_name or speaker
+
+
+def _extract_script_dialogue_cues(
+    script: str,
+    characters: List[CharacterInScene],
+) -> list[_DialogueCue]:
+    """Extract scripted dialogue for known characters without rewriting the script."""
+    aliases = _character_dialogue_aliases(characters)
+    if not aliases:
+        return []
+
+    cues: list[_DialogueCue] = []
+    for raw_line in str(script or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        matched_quoted_speaker = False
+        for match in _SPEAKER_DIALOGUE_RE.finditer(line):
+            canonical_speaker = _canonical_dialogue_speaker(
+                match.group("speaker"),
+                aliases,
+            )
+            if canonical_speaker.casefold() not in aliases:
+                continue
+            text = match.group("text").strip()
+            if text:
+                cues.append(_DialogueCue(canonical_speaker, text))
+                matched_quoted_speaker = True
+        if matched_quoted_speaker:
+            continue
+
+        speaker_match = _SCRIPT_SPEAKER_LINE_RE.match(line)
+        if not speaker_match:
+            continue
+        canonical_speaker = _canonical_dialogue_speaker(
+            speaker_match.group("speaker"),
+            aliases,
+        )
+        if canonical_speaker.casefold() not in aliases:
+            continue
+        text = _SCRIPT_LEADING_PARENTHETICAL_RE.sub(
+            "",
+            speaker_match.group("text"),
+        ).strip()
+        text = text.strip("\u201c\u201d\"")
+        if text:
+            cues.append(_DialogueCue(canonical_speaker, text))
+    return cues
+
+
+def _extract_storyboard_dialogue_cues(
+    storyboard: List[ShotBriefDescription],
+    characters: List[CharacterInScene],
+) -> list[_DialogueCue]:
+    aliases = _character_dialogue_aliases(characters)
+    cues: list[_DialogueCue] = []
+    for shot in sorted(storyboard, key=lambda item: item.idx):
+        for line in str(shot.audio_desc or "").splitlines():
+            quoted_matches = list(_SPEAKER_DIALOGUE_RE.finditer(line))
+            for match in quoted_matches:
+                text = match.group("text").strip()
+                if not text:
+                    continue
+                speaker = _canonical_dialogue_speaker(
+                    match.group("speaker"),
+                    aliases,
+                )
+                if speaker.casefold() not in aliases:
+                    continue
+                cues.append(_DialogueCue(speaker, text))
+            if quoted_matches:
+                continue
+
+            marker_cues_found = False
+            for match in _AUDIO_UNQUOTED_DIALOGUE_RE.finditer(line):
+                speaker = _canonical_dialogue_speaker(
+                    match.group("speaker"),
+                    aliases,
+                )
+                if speaker.casefold() not in aliases:
+                    continue
+                text = _SCRIPT_LEADING_PARENTHETICAL_RE.sub(
+                    "",
+                    match.group("text"),
+                ).strip()
+                text = text.strip("\u201c\u201d\"")
+                if text:
+                    cues.append(_DialogueCue(speaker, text))
+                marker_cues_found = True
+            if marker_cues_found:
+                continue
+
+            plain_match = _PLAIN_STORYBOARD_DIALOGUE_RE.match(line)
+            if not plain_match:
+                continue
+            speaker = _canonical_dialogue_speaker(
+                plain_match.group("speaker"),
+                aliases,
+            )
+            if speaker.casefold() not in aliases:
+                continue
+            text = _SCRIPT_LEADING_PARENTHETICAL_RE.sub(
+                "",
+                plain_match.group("text"),
+            ).strip()
+            text = text.strip("\u201c\u201d\"")
+            if text:
+                cues.append(_DialogueCue(speaker, text))
+    return cues
+
+
+def _storyboard_dialogue_fidelity_issue(
+    script: str,
+    storyboard: List[ShotBriefDescription],
+    characters: List[CharacterInScene],
+) -> str:
+    """Return a targeted revision reason when storyboard dialogue diverges."""
+    expected_cues = _extract_script_dialogue_cues(script, characters)
+    if not expected_cues:
+        return ""
+
+    actual_cues = _extract_storyboard_dialogue_cues(storyboard, characters)
+
+    def signature(cues: list[_DialogueCue]) -> list[tuple[str, str]]:
+        return [
+            (
+                _normalize_dialogue_speaker(cue.speaker).casefold(),
+                _normalize_dialogue_text(cue.text),
+            )
+            for cue in cues
+        ]
+
+    expected = signature(expected_cues)
+    actual = signature(actual_cues)
+    if expected == actual:
+        return ""
+
+    def render(cues: list[_DialogueCue]) -> str:
+        return "\n".join(
+            f"{index + 1}. {cue.speaker}: {cue.text}"
+            for index, cue in enumerate(cues)
+        )
+
+    return (
+        "The storyboard scripted dialogue sequence is missing, duplicated, "
+        "reordered, or assigned to the wrong speaker.\n"
+        f"Expected script order:\n{render(expected_cues)}\n"
+        f"Current storyboard order:\n{render(actual_cues)}"
+    )
 
 
 def _explicit_speaker_for_occurrence(
@@ -481,6 +749,9 @@ class StoryboardArtist:
     ):
         self.chat_model = chat_model
         self.last_director_interpretation = ""
+        self.last_storyboard_revision_issue = ""
+        self.last_storyboard_before_revision: List[ShotBriefDescription] = []
+        self.last_storyboard_after_revision: List[ShotBriefDescription] = []
 
 
     @retry(stop=stop_after_attempt(3), after=after_func)
@@ -542,6 +813,61 @@ class StoryboardArtist:
             timeout=retry_timeout,
         )
         storyboard = response.storyboard
+
+        dialogue_fidelity_issue = _storyboard_dialogue_fidelity_issue(
+            script_str,
+            storyboard,
+            characters,
+        )
+        self.last_storyboard_revision_issue = dialogue_fidelity_issue
+        if dialogue_fidelity_issue:
+            self.last_storyboard_before_revision = list(storyboard)
+            revision_parser = PydanticOutputParser(
+                pydantic_object=StoryboardResponse
+            )
+            for revision_attempt in range(2):
+                revision_messages = [
+                    (
+                        'system',
+                        system_prompt_template_revise_storyboard_dialogue.format(
+                            format_instructions=revision_parser.get_format_instructions(),
+                        ),
+                    ),
+                    (
+                        'human',
+                        human_prompt_template_revise_storyboard_dialogue.format(
+                            script_str=script_str,
+                            characters_str=characters_str,
+                            dialogue_fidelity_issue=dialogue_fidelity_issue,
+                            current_storyboard_json=json.dumps(
+                                [shot.model_dump() for shot in storyboard],
+                                ensure_ascii=False,
+                                indent=2,
+                            ),
+                        ),
+                    ),
+                ]
+                revision_response: StoryboardResponse = await asyncio.wait_for(
+                    (self.chat_model | revision_parser).ainvoke(revision_messages),
+                    timeout=retry_timeout,
+                )
+                revised_storyboard = revision_response.storyboard
+                remaining_issue = _storyboard_dialogue_fidelity_issue(
+                    script_str,
+                    revised_storyboard,
+                    characters,
+                )
+                if not remaining_issue:
+                    storyboard = revised_storyboard
+                    self.last_storyboard_after_revision = list(storyboard)
+                    break
+                dialogue_fidelity_issue = remaining_issue
+                storyboard = revised_storyboard
+            else:
+                raise ValueError(
+                    "Storyboard dialogue revision did not restore script "
+                    f"fidelity: {remaining_issue}"
+                )
 
         return storyboard
 

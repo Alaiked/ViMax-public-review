@@ -488,6 +488,7 @@ async def run_text_plan(
     usage_path = working_path / "llm_usage.json"
     contexts_path = working_path / "decomposition_contexts.json"
     interpretation_path = working_path / "director_interpretation.txt"
+    revision_path = working_path / "storyboard_revision.json"
     contexts = result.get("decomposition_contexts", [])
     if isinstance(contexts, dict):
         contexts = [contexts[idx] for idx in sorted(contexts)]
@@ -505,6 +506,37 @@ async def run_text_plan(
         or ""
     ).strip()
     interpretation_path.write_text(director_interpretation, encoding="utf-8")
+    storyboard_artist = getattr(pipeline, "storyboard_artist", None)
+    revision_issue = str(
+        getattr(storyboard_artist, "last_storyboard_revision_issue", "") or ""
+    ).strip()
+    if revision_issue:
+        revision_path.write_text(
+            json.dumps(
+                {
+                    "issue": revision_issue,
+                    "before": [
+                        _as_dict(shot)
+                        for shot in getattr(
+                            storyboard_artist,
+                            "last_storyboard_before_revision",
+                            [],
+                        )
+                    ],
+                    "after": [
+                        _as_dict(shot)
+                        for shot in getattr(
+                            storyboard_artist,
+                            "last_storyboard_after_revision",
+                            [],
+                        )
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
     write_director_report(
         result,
         report_path,
@@ -532,6 +564,9 @@ async def run_text_plan(
         "usage": usage,
         "director_output_path": str(report_path),
         "director_interpretation_path": str(interpretation_path),
+        "storyboard_revision_path": (
+            str(revision_path) if revision_path.exists() else ""
+        ),
         "llm_usage_path": str(usage_path),
         "decomposition_contexts_path": str(contexts_path),
         "director_prompts_json_path": prompts_json_path,

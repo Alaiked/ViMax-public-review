@@ -25,8 +25,17 @@ tests, and sanitized review evidence needed to inspect those changes.
   `86c4e2738170ba12253b4f1cf32555b93836487d`
 - Private V9 candidate subject:
   `Add V9 two-stage director decision candidate`
-- The V9 candidate is copied from that signed-off private checkpoint. The
-  public review commit SHA is recorded by GitHub after this mirror commit.
+- Private V10-A candidate commit:
+  `3fe8276c725a13475803cdb5bcdddc8214818658`
+- Private V10-A candidate subject:
+  `Add V10 director decision fidelity candidate`
+- Private V10-B candidate commit:
+  `d1ae11bc0b3ffb29a528abecbee0f24de6c50a45`
+- Private V10-B candidate subject:
+  `Add V10 targeted director revision experiment`
+- V10-B is retained as `NO MERGE`. The reviewed V10 source and sanitized
+  experiment evidence are copied from the private worktree. The public review
+  commit SHA is recorded by GitHub after this mirror commit.
 - License: the original upstream `LICENSE` is preserved unchanged.
 
 This public mirror uses a new single-commit Git history. It does not publish or
@@ -51,6 +60,10 @@ rewrite the private repository's Git history.
 - `evidence/v9_director_decision_quality_sanitized.md`: sanitized V9
   two-stage-director implementation evidence, aggregate measurements, and real
   failure cases, with no private script or character material.
+- `evidence/v10_director_decision_fidelity_sanitized.md`: sanitized V10
+  Stage B prompt/revision evidence, aggregate run measurements, failure cases,
+  and the V10-B `NO MERGE` decision, with no private script or character
+  material.
 
 ## Public-Version Differences From The Private Source
 
@@ -132,6 +145,14 @@ The V9 candidate is not signed off. It improves some causal attention and
 action-specific performance choices, but the real runs exposed a timing
 regression, a lost reaction beat, a cross-shot dialogue-order failure, and a
 prop-handoff blocker in the existing text-continuity validation.
+
+The V10 candidate reorganizes Stage B around script-timeline preservation,
+beat-to-shot decisions, performance budgeting, physical continuity, and
+targeted dialogue repair. It is retained as **NO MERGE**: V10-A could still
+omit scripted dialogue, V10-B restored one such line only after a full-board
+retry, and the text runs still exposed performance-time overcommitment,
+skipped object pickup, and invalid body-motion constraints. A structural pass
+is not a director-quality pass.
 
 ## Scope Boundary
 
