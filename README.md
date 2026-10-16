@@ -17,14 +17,16 @@ tests, and sanitized review evidence needed to inspect those changes.
   `fd4b72e7731be6e5f88486206d25ea59849b0285`
 - Private source repository: `Alaiked/ViMax` (private)
 - Private source branch: `master`
-- Private source commit mirrored for review:
-  `957e08cb5de95f096f2fb9cfb8d30a0a5907c61d`
-- Private source commit subject:
-  `checkpoint: ViMax director planning and H3 preparation`
-- The public mirror also contains the deterministic working-tree fixes for
-  dialogue-order validation and H3 prompt-split failure handling; these were
-  not committed to the private source repository when this review revision was
-  built.
+- Private V9 base commit:
+  `b83c66d9d1437e6882d42a16145cbc6f11eeba6e`
+- Private V9 base subject:
+  `Sync signed-off ViMax planning validation fixes`
+- Private V9 candidate commit:
+  `86c4e2738170ba12253b4f1cf32555b93836487d`
+- Private V9 candidate subject:
+  `Add V9 two-stage director decision candidate`
+- The V9 candidate is copied from that signed-off private checkpoint. The
+  public review commit SHA is recorded by GitHub after this mirror commit.
 - License: the original upstream `LICENSE` is preserved unchanged.
 
 This public mirror uses a new single-commit Git history. It does not publish or
@@ -46,6 +48,9 @@ rewrite the private repository's Git history.
 - `tests/`: focused public tests using synthetic fixtures.
 - `evidence/v7_v8_sanitized_comparison.md`: sanitized V7/V8 comparison and the
   V8 `NO MERGE` decision.
+- `evidence/v9_director_decision_quality_sanitized.md`: sanitized V9
+  two-stage-director implementation evidence, aggregate measurements, and real
+  failure cases, with no private script or character material.
 
 ## Public-Version Differences From The Private Source
 
@@ -111,16 +116,22 @@ Run the focused tests from this directory:
 python -m pytest
 ```
 
-The public tests are intentionally synthetic. They verify prompt and context
-contracts, require dialogue in `motion_desc` to preserve the source order, and
-require incomplete `[Shot N]` prompt splits to fail instead of duplicating a
-shot. A structural pass is not a director-quality pass, a prop-continuity pass,
-a timing pass, or a production-ready declaration.
+The public tests are intentionally synthetic. They verify Stage A/Stage B
+ordering and authority, prompt and context contracts, require dialogue in
+`motion_desc` to preserve the source order, and require incomplete `[Shot N]`
+prompt splits to fail instead of duplicating a shot. A structural pass is not a
+director-quality pass, a prop-continuity pass, a timing pass, or a
+production-ready declaration.
 
 The V8 external-director candidate is retained as `NO MERGE`: it improved camera
 economy but reversed two dialogue lines in `motion_desc` relative to
 `audio_desc`, copied editorial timing windows into shot durations, and removed
 the dedicated final reaction beat.
+
+The V9 candidate is not signed off. It improves some causal attention and
+action-specific performance choices, but the real runs exposed a timing
+regression, a lost reaction beat, a cross-shot dialogue-order failure, and a
+prop-handoff blocker in the existing text-continuity validation.
 
 ## Scope Boundary
 

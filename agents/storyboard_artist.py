@@ -13,62 +13,85 @@ from utils.retry import after_func
 
 
 
+system_prompt_template_interpret_scene = \
+"""
+[Role]
+You are the director preparing one scene before any shots are chosen. You are not writing coverage, a plot summary, or a new screenplay.
+
+[Task]
+Read the complete scene and the supplied character definitions. Build a compact directing brief that identifies what the scene is really doing and how the audience should experience it. The script remains the final authority: do not add, remove, reorder, reinterpret, or rewrite events, dialogue, props, space, or character motivation.
+
+[Decide]
+- The scene's central dramatic pressure: what changes, who is trying to make it change, who resists, and what each person cannot openly say.
+- The playable beats: only the turns that change knowledge, power, intimacy, risk, or intention. Name a beat by its dramatic event, not by a camera move. Do not force a fixed list of beat labels, and do not equate one dialogue line or one action step with one beat.
+- Information and attention: what the audience should know at each turn, when to watch the person acting, the person receiving, a revealing object, or the space between them, and what should be withheld.
+- Character-specific play: for each participant, a concrete objective, tactic, obstacle, and change of tactic in this scene. Explain why the same line or action would be performed differently by this character.
+- Visual and rhythmic organization: the meaningful spatial relationships, visual center, axis, major reaction or silence, pacing shifts, and possible editing motivations. Choose precise visual ideas, but do not prescribe a fixed shot template.
+- The final residue: what image, pause, or unanswered pressure should remain after the last scripted event.
+
+[How to write]
+- Write in the language of the script.
+- Be concrete and selective. Use short labeled paragraphs only where they clarify the choice; omit a category if it does not matter for this scene. Never fill categories mechanically.
+- Distinguish a beat from an action step. A beat may contain several lines, simultaneous behavior, a silence, or one decisive gesture.
+- Treat personality notes as evidence for behavior, not as labels.
+- Keep the brief compact enough to guide a separate storyboard call. Do not list every line of dialogue.
+- Do not propose extra characters, props, locations, events, backstory, or motivations. If the script is silent on a fact, do not invent it.
+"""
+
+
+human_prompt_template_interpret_scene = \
+"""
+<SCRIPT>
+{script_str}
+</SCRIPT>
+
+<CHARACTERS>
+{characters_str}
+</CHARACTERS>
+
+<USER_REQUIREMENT>
+{user_requirement_str}
+</USER_REQUIREMENT>
+"""
+
+
 system_prompt_template_design_storyboard = \
 """
 [Role]
-You are a professional film director and storyboard artist with the following core skills:
-- Script Analysis: Ability to quickly interpret a script's text, identifying the setting, character actions, dialogue, emotions, and narrative pacing.
-- Visualization: Expertise in translating written descriptions into visual frames, including composition, lighting, and spatial arrangement.
-- Storyboarding: Proficiency in cinematic language, such as shot types (e.g., close-up, medium shot, wide shot), camera angles (e.g., high angle, eye-level), camera movements (e.g., zoom, pan), and transitions.
-- Narrative Continuity: Ability to ensure the storyboard sequence is logically smooth, highlights key plot points, and maintains emotional consistency.
-- Technical Knowledge: Understanding of basic storyboard formats and industry standards, such as using numbered shots and concise descriptions.
-- Directorial Interpretation: Ability to identify the dramatic beat and narrative purpose of every shot before choosing its visual treatment.
-- Performance and Blocking: Ability to stage character relationships, spatial blocking, reactions, and actor performance in a way that serves the scene.
-- Character-Specific Direction: Ability to turn supplied personality notes into playable behavior without inventing new plot or changing the script's motivations.
+You are a professional film director and storyboard artist. Convert the original scene and the director's interpretation into a complete production-ready storyboard using the supplied structured schema.
 
-[Task]
-Your task is to design a complete, production-ready storyboard based on a user-provided script (which contains only one scene). Act as the director: interpret the scene, choose where to cut, and specify the visual and performance information needed to shoot each dramatic beat. The storyboard should be presented in text form, clearly displaying the visual elements and narrative flow of each shot to help the user visualize the scene.
+[Authority]
+- The original script and supplied character definitions are the final authority for story events, dialogue, props, space, and motivation.
+- The director's interpretation is advisory creative guidance. It must not override or add to the script.
+- Preserve every scripted dialogue line exactly once, in the original order, in the audio description of the shots. Do not summarize, paraphrase, merge, or invent lines.
+- Do not add characters, extras, locations, props, or events that are not supported by the script.
+
+[Shot design]
+- Organize the board by dramatic beats, not by dialogue count, action-step count, or a mechanical shot-reverse-shot pattern.
+- Each shot must have one primary dramatic function: reveal information, change power or intimacy, stage a decision, register a reaction, establish a necessary spatial relation, or create a deliberate hold or ellipsis.
+- Choose what the audience first sees, where attention moves, and what image or tension remains at the end of the shot. A shot may contain multiple lines or actions when they form one beat.
+- Cut when attention, knowledge, power, space, point of view, or rhythm changes. A change in shot size alone is not an editing motivation.
+- Use reactions, off-screen presence, occlusion, foreground layering, spatial separation, action matching, or stillness when they carry meaning. Do not force any device or movement into every shot.
+- Convert character objectives and tactics into concrete playable behavior: listening, withholding, testing, deciding, resisting, committing, changing tactics, or reacting at a specific moment. Avoid generic expression labels and decorative gestures.
+- Keep a decisive cause and its visible consequence together when they form one continuous action. Do not split preparation, execution, contact, and result into routine prop inserts unless isolation or withheld information has a real dramatic purpose.
+- Describe the camera precisely: shot size, angle, composition, focus, movement, and the reason the frame changes. Camera movement must reveal, follow, pressure, isolate, connect, or withhold; static framing is valid when the beat needs it.
+- Maintain a consistent 180-degree action axis, eyeline, screen direction, spatial geography, and prop state across cuts. Motivate a necessary axis change visibly.
+- Make important actions, contact, and prop state visible within the intended composition. Do not assert a scripted action off-screen when the beat depends on seeing it.
+- Treat cam_idx as a reusable camera setup, not a shot number. Reuse a setup only when position, lens, angle, framing, and movement baseline genuinely match.
+- Estimate estimated_duration_seconds from the full performance: dialogue length, pauses, concurrent behavior, physical travel, contact, and the final reaction. Do not copy source time windows or mechanically multiply action steps. Mark it honestly as a director estimate.
+
+[Visible storyboard contract]
+- Every visual description must be self-contained and use frame-relative placement and clear direction of gaze and movement.
+- Keep character names in angle brackets inside visual descriptions, but not in speaker fields or dialogue.
+- Make the sequence continuous in character, space, and important-prop state without forcing the reader to invent transitions.
+- When a close shot focuses on a person, specify the visible body part and the performance information it carries.
+- Keep interior/exterior, time of day, and location consistent with the script.
 
 [Input]
-The user will provide the following input.
-- Script:A complete scene script containing dialogue, action descriptions, and scene settings. The script focuses on only one scene; there is no need to handle multiple scene transitions. The script input is enclosed within <SCRIPT> and </SCRIPT>.
-- Characters List: A list describing basic information for each character, such as name, personality traits, appearance (if relevant). The character list is enclosed within <CHARACTERS> and </CHARACTERS>.
-- User requirement: The user requirement (optional) is enclosed within <USER_REQUIREMENT> and </USER_REQUIREMENT>, which may include:
-    - Target audience (e.g., children, teenagers, adults).
-    - Storyboard style (e.g., realistic, cartoon, abstract).
-    - Desired number of shots (e.g., "not more than 10 shots").
-    - Other specific instructions (e.g., emphasize the characters' actions).
+The user provides the original script, character definitions, and an optional requirement.
 
 [Output]
 {format_instructions}
-
-[Guidelines]
-- Ensure all output values (except keys) match the language used in the script.
-- Preserve the script exactly at the story level: do not change key events, dialogue, or character motivations. Visual interpretation may clarify staging, but it must not invent a different plot or outcome.
-- Preserve exact character, prop, and setting identities from the script and supplied definitions. Keep period-specific terms and materials unchanged; never replace a period-specific object with a modern synonym or a different object.
-- Preserve every scripted dialogue line exactly in the audio description of one shot; do not omit, summarize, reorder, or rewrite dialogue.
-- Do not add characters, extras, props, locations, or events that are not supported by the script.
-- Each shot must have a clear dramatic beat and narrative purpose—such as establishing the setting, showing character relationships, revealing information, or highlighting reactions.
-- Use cinematic language deliberately: choose the shot size, composition, camera position, angle, focus, and camera movement to serve the dramatic beat and guide audience attention.
-- Keep the scene's interior/exterior designation, time of day, and same location consistent with the script. Do not move one scene between indoors and outdoors or between different locations without a scripted transition.
-- When designing a shot, make the key action and any important prop visible within the final composition. A line about an off-screen action is not a substitute for showing a scripted pickup, handoff, or physical contact when the beat depends on it.
-- Every cut must have an editing motivation. Cut for a new dramatic beat, a change in point of view, a reaction, a spatial reorientation, or a deliberate change in rhythm; do not cut mechanically.
-- Reuse the same cam_idx whenever a new shot can be captured from the same camera position, lens, angle, and framing setup. A camera may be reused after movement when the new shot returns to the same setup. Do not create a new camera for every shot; a reused cam_idx must identify a real shared camera setup.
-- A reused cam_idx must share the same camera position, lens, angle, framing, and movement baseline. Do not reuse a cam_idx merely because an index is available, and do not claim a setup is shared when the direction, lens, or framing differs.
-- Avoid consecutive shots with the same shot size unless the repetition is motivated by the dramatic beat, a deliberate match, or a new visual emphasis.
-- Keep character names in visual descriptions and speaker fields consistent with the character list. In visual descriptions, enclose names in angle brackets (e.g., <Alice>), but not in dialogue or speaker fields.
-- When describing visual elements, it is necessary to indicate the position of the element within the frame. For example, Character A is on the left side of the frame, facing toward the right, with a table in front of him. The table is positioned slightly to the left of the center of the frame. Ensure that invisible elements are not included. For instance, do not describe someone behind a closed door if they cannot be seen.
-- Track the state of important props across shots. If a prop changes position, changes hands, or disappears from view, show the transfer or change, or use a clear and plausible off-screen action or time ellipsis that accounts for it. Do not let a prop teleport into or out of a character's hands.
-- When the script explicitly includes a scripted acquisition or retrieval, do not remove that action. Stage the acquisition on screen, or account for it with a clear and plausible off-screen action or time ellipsis.
-- Do not infer role-typical accessories or tools unless they are explicitly present in the script or supplied character definitions.
-- Describe actor performance through precise, playable behavior: gaze, posture, gesture, breathing, physical interaction, vocal intent, and reaction timing.
-- When supplied personality notes describe a character, translate them into playable choices rather than changing the written dialogue or events. A lively, impulsive character should show agency through gaze, timing, gesture, and an unexpected but script-supported initiative; a restrained, perceptive character should exert influence through precise timing, stillness, and controlled interventions, not generic coldness or display.
-- A shot may contain multiple lines of dialogue, multiple speakers, silent reactions, or overlapping behavior when they belong to the same dramatic beat. Preserve the script's dialogue content and allow the performance to breathe; do not split shots solely to enforce one dialogue line per character.
-- For every shot, provide estimated_duration_seconds based on dialogue length, required performance, concurrent action, physical distance, contact choreography, and editing rhythm. Estimate the whole shot, not by mechanically multiplying the number of action steps. Source time windows are editorial reference beats only, not per-shot durations; do not copy them. A phrase such as "the last approximately 0.6 seconds" describes only the final silent beat, not the entire shot duration. Before returning a duration, check that it can accommodate the shot's full blocking, all dialogue, contact process, reactions, and end-state beat; lengthen the shot or move subordinate business rather than describing an impossible performance speed. This is a director estimate, not a user-specified hard duration; label or treat it as an estimate rather than a production timing guarantee.
-- Avoid unsafe content (violence, discrimination, etc.) in visual descriptions. Use indirect methods like sound or suggestive imagery when needed, and substitute sensitive elements (e.g., ketchup for blood).
-- Each shot requires a self-contained visual description, but consecutive shots must preserve continuous character, spatial, and important-prop state without relying on the reader to invent transitions.
-- When the shot focuses on a character, describe which specific body part the focus is on.
-- When describing a character, it is necessary to indicate the direction they are facing.
 """
 
 
@@ -85,7 +108,28 @@ human_prompt_template_design_storyboard = \
 <USER_REQUIREMENT>
 {user_requirement_str}
 </USER_REQUIREMENT>
+
+<DIRECTOR_INTERPRETATION>
+{director_interpretation}
+</DIRECTOR_INTERPRETATION>
 """
+
+
+def _message_content_to_text(content) -> str:
+    """Normalize plain-text and content-block chat responses."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: List[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(part.strip() for part in parts if part.strip()).strip()
+    return str(content or "").strip()
 
 
 
@@ -436,6 +480,7 @@ class StoryboardArtist:
         chat_model: BaseChatModel,
     ):
         self.chat_model = chat_model
+        self.last_director_interpretation = ""
 
 
     @retry(stop=stop_after_attempt(3), after=after_func)
@@ -456,10 +501,40 @@ class StoryboardArtist:
         characters_str = "\n".join([f"Character {index}: {char}" for index, char in enumerate(characters)])
         user_requirement_str = user_requirement.strip() if user_requirement else ""
 
+        interpretation_messages = [
+            ('system', system_prompt_template_interpret_scene),
+            (
+                'human',
+                human_prompt_template_interpret_scene.format(
+                    script_str=script_str,
+                    characters_str=characters_str,
+                    user_requirement_str=user_requirement_str,
+                ),
+            ),
+        ]
+        interpretation_response = await asyncio.wait_for(
+            self.chat_model.ainvoke(interpretation_messages),
+            timeout=retry_timeout,
+        )
+        director_interpretation = _message_content_to_text(
+            getattr(interpretation_response, "content", interpretation_response)
+        )
+        if not director_interpretation:
+            raise ValueError("Scene interpretation model returned empty text.")
+        self.last_director_interpretation = director_interpretation
+
         parser = PydanticOutputParser(pydantic_object=StoryboardResponse)
         messages = [
             ('system', system_prompt_template_design_storyboard.format(format_instructions=parser.get_format_instructions())),
-            ('human', human_prompt_template_design_storyboard.format(script_str=script_str, characters_str=characters_str, user_requirement_str=user_requirement_str)),
+            (
+                'human',
+                human_prompt_template_design_storyboard.format(
+                    script_str=script_str,
+                    characters_str=characters_str,
+                    user_requirement_str=user_requirement_str,
+                    director_interpretation=director_interpretation,
+                ),
+            ),
         ]
         chain = self.chat_model | parser
         response: StoryboardResponse = await asyncio.wait_for(

@@ -17,6 +17,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from agents.storyboard_artist import (
     system_prompt_template_decompose_visual_description,
     system_prompt_template_design_storyboard,
+    system_prompt_template_interpret_scene,
 )
 from pipelines.script2video_pipeline import Script2VideoPipeline
 
@@ -181,6 +182,7 @@ def write_director_prompts(output_dir: str | Path) -> tuple[str, str]:
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
     payload = {
+        "interpret_scene": system_prompt_template_interpret_scene,
         "design_storyboard": system_prompt_template_design_storyboard,
         "decompose_visual_description": system_prompt_template_decompose_visual_description,
     }
@@ -194,6 +196,12 @@ def write_director_prompts(output_dir: str | Path) -> tuple[str, str]:
         "\n".join(
             [
                 "# ViMax Director Prompts",
+                "",
+                "## system_prompt_template_interpret_scene",
+                "",
+                "```text",
+                payload["interpret_scene"],
+                "```",
                 "",
                 "## system_prompt_template_design_storyboard",
                 "",
@@ -214,7 +222,11 @@ def write_director_prompts(output_dir: str | Path) -> tuple[str, str]:
     return str(json_path), str(markdown_path)
 
 
-def write_director_report(result: dict[str, Any], output_path: str | Path) -> None:
+def write_director_report(
+    result: dict[str, Any],
+    output_path: str | Path,
+    director_interpretation: str = "",
+) -> None:
     """Write a human-readable shot table, motion plan, and camera tree."""
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +257,10 @@ def write_director_report(result: dict[str, Any], output_path: str | Path) -> No
         "# ViMax Director Text Plan",
         "",
         "This report contains structured director planning only. No image or video generation was invoked.",
+        "",
+        "## Director Interpretation",
+        "",
+        director_interpretation or "No director interpretation was recorded.",
         "",
         "## Characters",
         "",
@@ -471,6 +487,7 @@ async def run_text_plan(
     report_path = working_path / "director_output.md"
     usage_path = working_path / "llm_usage.json"
     contexts_path = working_path / "decomposition_contexts.json"
+    interpretation_path = working_path / "director_interpretation.txt"
     contexts = result.get("decomposition_contexts", [])
     if isinstance(contexts, dict):
         contexts = [contexts[idx] for idx in sorted(contexts)]
@@ -479,7 +496,20 @@ async def run_text_plan(
         encoding="utf-8",
     )
     prompts_json_path, prompts_markdown_path = write_director_prompts(working_path)
-    write_director_report(result, report_path)
+    director_interpretation = str(
+        getattr(
+            getattr(pipeline, "storyboard_artist", None),
+            "last_director_interpretation",
+            "",
+        )
+        or ""
+    ).strip()
+    interpretation_path.write_text(director_interpretation, encoding="utf-8")
+    write_director_report(
+        result,
+        report_path,
+        director_interpretation=director_interpretation,
+    )
 
     usage = usage_callback.summary()
     usage.update(
@@ -501,6 +531,7 @@ async def run_text_plan(
         "pipeline": pipeline,
         "usage": usage,
         "director_output_path": str(report_path),
+        "director_interpretation_path": str(interpretation_path),
         "llm_usage_path": str(usage_path),
         "decomposition_contexts_path": str(contexts_path),
         "director_prompts_json_path": prompts_json_path,
